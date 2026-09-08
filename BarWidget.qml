@@ -95,8 +95,11 @@ BarWidget {
 
     active: root.lidAwake
     activeText: "󰌢"
-    activeTooltipText: "Lid close ignored"
-    inactiveTooltipText: "Suspends on lid close"
+    // Tooltips name what a click does, not what is currently true, matching
+    // Dnd ("Silence Notifications" / "Allow Notifications") and the rest of the
+    // built-in indicators.
+    activeTooltipText: "Suspend on Lid Close"
+    inactiveTooltipText: "Ignore Lid Close"
     indicatorHost: revealProxy
     // Keeps the cluster's reveal alive while the pointer travels off it and
     // onto this icon, which sits outside the cluster's own hover area.

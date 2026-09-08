@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.michalpomykacz.lid-awake",
+  "name": "Lid awake",
+  "version": "1.0.0",
+  "author": "Michal Pomykacz",
+  "description": "Bar toggle that keeps the laptop running when the lid closes",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Lid awake",
+    "description": "Ignore lid close instead of suspending",
+    "category": "Status",
+    "allowMultiple": false,
+    "defaultSection": "center"
+  }
+}

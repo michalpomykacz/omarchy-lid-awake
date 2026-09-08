@@ -17,6 +17,7 @@ BarWidget {
   readonly property string stateDir: Quickshell.env("HOME") + "/.local/state/omarchy/indicators"
   readonly property string statePath: stateDir + "/lid-awake"
   property bool lidAwake: false
+  property string pendingWrite: ""
 
   // Every instance of the neighbouring indicator cluster. Reading it through
   // `moduleWidgets` keeps this a live binding: the bar rebuilds `moduleSlots`
@@ -48,18 +49,38 @@ BarWidget {
   // A bar surface exists per monitor, so this widget is instantiated more than
   // once and every copy has to agree. `broadcast` reaches all of them; the
   // caller decides the absolute value first so the surfaces cannot drift the
-  // way a per-instance `!lidAwake` would. The file is only persistence and
-  // hydration for surfaces that appear later — deliberately not watched, since
-  // a writer that re-reads its own write races itself and lands on the stale
-  // value.
+  // way a per-instance `!lidAwake` would.
   function setAwake(value) {
     root.broadcast(value ? "enableAwake" : "disableAwake")
-    stateFile.setText((value ? "awake" : "suspend") + "\n")
+    root.persist(value ? "awake" : "suspend")
     return value ? "awake" : "suspend"
   }
 
   function enableAwake() { root.lidAwake = true }
   function disableAwake() { root.lidAwake = false }
+
+  // Writes go through a subprocess, not FileView.setText: each surface owns a
+  // separate FileView with its own cached copy of the file, and setText drops a
+  // write whose value already matches that cache. Whichever surface was not
+  // clicked keeps a stale cache, so toggling on from one monitor and off from
+  // another silently left `awake` on disk under an interface reporting `off` —
+  // and the next shell start honoured the disk. A subprocess has no cache to
+  // disagree with.
+  function persist(value) {
+    root.pendingWrite = value
+    if (!stateWriter.running) root.flushWrite()
+  }
+
+  // One queued value, last write wins. Retargeting a Process while it runs
+  // loses the write, and two quick clicks must not land out of order.
+  function flushWrite() {
+    if (root.pendingWrite === "") return
+
+    var value = root.pendingWrite
+    root.pendingWrite = ""
+    stateWriter.command = ["bash", "-c", 'printf \'%s\\n\' "$2" > "$1"', "lid-awake", root.statePath, value]
+    stateWriter.running = true
+  }
 
   BarIndicator {
     id: indicator
@@ -109,6 +130,7 @@ BarWidget {
   // `systemd-inhibit --list`. Move the lock into a service plugin if the
   // duplicate rows ever matter.
   Process {
+    id: inhibitor
     running: root.lidAwake
     command: [
       "systemd-inhibit",
@@ -118,6 +140,28 @@ BarWidget {
       "--mode=block",
       "sleep", "infinity"
     ]
+
+    // `sleep infinity` only ends because the toggle went off, or because
+    // something went wrong — logind unavailable, or the lock refused because
+    // the session is no longer active. In the second case the indicator would
+    // otherwise keep promising protection that nothing holds, so drop the
+    // toggle and say why.
+    //
+    // A failure here is treated as total rather than per-surface: one held lock
+    // is enough to inhibit the lid, but every cause is session-wide, so a
+    // surface failing alone is not a case worth modelling.
+    onExited: function(exitCode, exitStatus) {
+      if (!root.lidAwake) return
+
+      console.warn("lid-awake: inhibitor exited unexpectedly (code " + exitCode
+        + ", status " + exitStatus + "); lid close will suspend again")
+      root.setAwake(false)
+    }
+  }
+
+  Process {
+    id: stateWriter
+    onExited: root.flushWrite()
   }
 
   Process {
@@ -126,6 +170,8 @@ BarWidget {
     onExited: stateFile.reload()
   }
 
+  // Read-only: hydration at startup. Writes deliberately do not go through
+  // here — see `persist`.
   FileView {
     id: stateFile
     path: root.statePath

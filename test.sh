@@ -27,6 +27,12 @@ check() {
 
 original=$(omarchy-shell lid status)
 
+# The live lid policy must not be left changed by a test that dies halfway.
+restore() {
+  omarchy-shell lid "$([[ $original == awake ]] && echo on || echo off)" >/dev/null 2>&1
+}
+trap restore EXIT INT TERM
+
 for i in {1..8}; do
   if ((i % 2)); then want=awake; omarchy-shell lid on >/dev/null
   else want=suspend; omarchy-shell lid off >/dev/null; fi
@@ -40,7 +46,19 @@ omarchy-shell lid off >/dev/null; sleep 1
 sleep 1
 check awake
 
-omarchy-shell lid "$([[ $original == awake ]] && echo on || echo off)" >/dev/null
+# A write must land even when the value matches what the writing surface last
+# saw. FileView.setText used to drop exactly this write, so clicking on one
+# monitor and then another left the file disagreeing with every visible icon,
+# and the next shell start believed the file. Forcing the file out from under
+# the shell stands in for the second monitor's stale cache, which IPC cannot
+# reach on its own.
+omarchy-shell lid off >/dev/null; sleep 1
+printf 'awake\n' > "$STATE"
+omarchy-shell lid off >/dev/null; sleep 1.5
+[[ $(cat "$STATE") == suspend ]] || {
+  echo "FAIL no-op write skipped: reported $(omarchy-shell lid status), file $(cat "$STATE")"
+  fail=1
+}
 
 ((fail)) && { echo "FAILED"; exit 1; }
 echo "OK"
